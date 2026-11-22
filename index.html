@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>四屏看盘</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #0a1017;
+        color: #e0e8f0;
+        font:
+          14px Inter,
+          system-ui,
+          sans-serif;
+        color-scheme: dark;
+      }
+      header {
+        height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 16px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0;
+      }
+      header small,
+      .status {
+        color: #9faebb;
+      }
+      main {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 1fr 1fr;
+        height: calc(100dvh - 48px);
+        gap: 7px;
+        padding: 0 7px 7px;
+      }
+      article {
+        border: 1px solid #32404f;
+        border-radius: 8px;
+        overflow: hidden;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        background: #101720;
+      }
+      nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px;
+        flex-wrap: wrap;
+      }
+      select {
+        font: inherit;
+        border: 1px solid #41505f;
+        border-radius: 5px;
+        background: #18212d;
+        color: #edf3fa;
+        padding: 4px 7px;
+      }
+      .legend {
+        display: flex;
+        gap: 16px;
+        padding: 0 12px 4px;
+        font:
+          12px ui-monospace,
+          monospace;
+      }
+      .plot {
+        flex: 1;
+        min-height: 0;
+        position: relative;
+      }
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .note {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        text-align: center;
+        padding: 15px;
+        color: #aebac8;
+      }
+      .plot iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+      .note[hidden] {
+        display: none;
+      }
+      a {
+        color: #7ad9f5;
+      }
+      .status {
+        font-size: 11px;
+      }
+      @media (max-width: 720px) {
+        main {
+          height: auto;
+          grid-template-columns: 1fr;
+          grid-template-rows: none;
+        }
+        article {
+          height: 390px;
+        }
+      }
+      header {
+        height: auto;
+        min-height: 48px;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      header select {
+        font-weight: 600;
+      }
+      nav {
+        border-bottom: 1px solid #283441;
+      }
+      nav a {
+        margin-left: auto;
+        color: #9caab9;
+        font-size: 12px;
+      }
+      .plot iframe {
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+    
+      .author-card {
+        position: fixed;
+        top: 58px;
+        right: 16px;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 16px;
+        border: 1px solid #37515b;
+        border-radius: 12px;
+        background: #16232e;
+        color: #edf5f7;
+        box-shadow: 0 8px 28px #0006;
+      }
+
+      .author-card[hidden] { display: none; }
+
+      .author-avatar {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        background: #1e4246;
+        color: #83e4d4;
+        font-weight: 700;
+      }
+
+      .author-card small { display: block; color: #adc1ca; }
+      .author-card strong { font-size: 15px; }
+      .author-card button {
+        padding: 6px;
+        border: 0;
+        background: transparent;
+        color: #b6c8d1;
+        font-size: 18px;
+        cursor: pointer;
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .author-card { animation: author-in 180ms ease-out; }
+        @keyframes author-in {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      }
+      header { position: relative; }
+      #quote {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 20px;
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+        color: #cbd6df;
+      }
+      #quote[data-move="up"] { color: #ff627c; }
+      #quote[data-move="down"] { color: #36cc96; }
+      @media (max-width: 960px) {
+        #quote { position: static; transform: none; margin-left: auto; }
+      }
+      main.split-view {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr);
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+        height: calc(100dvh - 48px);
+      }
+      main.split-view article { height: auto; min-height: 0; }
+      .detail-panel { grid-area: 1 / 3 / 3 / 4; }
+      article.expanded { border-color: #64bfc7; }
+      .expand-chart {
+        cursor: pointer;
+        color: #d6e9ef;
+        background: #17222c;
+        border: 1px solid #405563;
+        border-radius: 5px;
+        padding: 4px 8px;
+        font: inherit;
+      }
+      .expand-chart:hover, .expand-chart:focus-visible { border-color: #76d3d6; }
+      .market-strip {
+        margin-left: auto;
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        min-width: 0;
+        overflow-x: auto;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+        font-size: 13px;
+      }
+      .market-strip #quote { position: static; transform: none; margin: 0; }
+      .market-strip b[data-sign="up"] { color: #ff627c; }
+      .market-strip b[data-sign="down"] { color: #36cc96; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <select id="market" aria-label="全部图表合约"></select>
+      <h1>四屏看盘</h1>
+      <small>币安 USDT 永续 · TradingView 图表</small>
+      <div class="market-strip">
+      <span id="quote" aria-label="最新成交价">等待报价</span>
+        <span title="24h涨跌额"><b data-stat="change">—</b></span>
+        <span title="24h涨跌幅"><b data-stat="percent">—</b></span>
+        <span title="标记价"><small>标记价</small> <b data-stat="mark">—</b></span>
+        <span title="指数价"><small>指数价</small> <b data-stat="index">—</b></span>
+        <span title="24h高"><small>24h高</small> <b data-stat="high">—</b></span>
+        <span title="24h低"><small>24h低</small> <b data-stat="low">—</b></span>
+        <span title="24h成交量"><small>24h成交量</small> <b data-stat="volume">—</b></span>
+      </div>
+    </header>
+    <main></main>
+    <aside class="author-card" hidden aria-label="作者信息">
+      <span class="author-avatar" aria-hidden="true">A</span>
+      <div><small>作者</small><strong>@Aaron_xsy123</strong></div>
+      <button type="button" aria-label="关闭作者提示">×</button>
+    </aside>
+    <script>
+      const coins = [
+        "BTCUSDT",
+        "XAUUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XAGUSDT",
+        "BNBUSDT",
+        "XRPUSDT",
+        "DOGEUSDT",
+      ];
+      const periods = {
+        "1m": ["1", "1分钟"],
+        "5m": ["5", "5分钟"],
+        "15m": ["15", "15分钟"],
+        "30m": ["30", "30分钟"],
+        "1h": ["60", "1小时"],
+        "4h": ["240", "4小时"],
+        "1d": ["D", "1天"],
+      };
+      const market = document.querySelector("#market");
+      function read(key) {
+        try {
+          return localStorage.getItem(key);
+        } catch {
+          return null;
+        }
+      }
+      function save(key, value) {
+        try {
+          localStorage.setItem(key, value);
+        } catch {}
+      }
+      for (const coin of coins)
+        market.add(new Option(coin + " · 币安永续", coin));
+      const previous = read("tv-global-market");
+      if (coins.includes(previous)) market.value = previous;
+      document.addEventListener("keydown", event => {
+        if (event.key === "Escape" && !event.defaultPrevented) {
+          document.querySelector("article.expanded .expand-chart")?.click();
+        }
+      });
+      const grid = document.querySelector("main");
+      const detailPanel = document.createElement("article");
+      detailPanel.className = "detail-panel";
+      detailPanel.innerHTML = '<nav><strong></strong><button class="expand-chart" style="margin-left:auto">返回四屏</button></nav><div class="plot"></div>';
+      const detailTitle = detailPanel.querySelector("strong");
+      const detailPlot = detailPanel.querySelector(".plot");
+      function closeDetail() {
+        const active = grid.querySelector("article.expanded");
+        if (!active) return;
+        active.classList.remove("expanded");
+        const button = active.querySelector(".expand-chart");
+        button.setAttribute("aria-expanded", "false");
+        detailPanel.remove();
+        detailPlot.replaceChildren();
+        grid.classList.remove("split-view");
+        button.focus({ preventScroll: true });
+      }
+      detailPanel.querySelector("button").onclick = closeDetail;
+      function createPanel(defaultPeriod, index) {
+        const panel = document.createElement("article");
+        panel.innerHTML =
+          '<nav><select aria-label="图表周期"></select><a target="_blank" rel="noopener">独立打开 ↗</a><button type="button" class="expand-chart" aria-label="放大此图" title="放大此图" aria-expanded="false">⛶</button></nav><div class="plot"></div>';
+        document.querySelector("main").append(panel);
+        const selector = panel.querySelector("select"),
+          plot = panel.querySelector(".plot"),
+          link = panel.querySelector("a");
+        for (const [key, [, label]] of Object.entries(periods))
+          selector.add(new Option(label, key));
+        const saved = read("tv-period-" + index);
+        let legacy;
+        try {
+          legacy = JSON.parse(read("market-panel-v1-" + index))?.[1];
+        } catch {}
+        selector.value = [saved, legacy, defaultPeriod].find((value) =>
+          Object.hasOwn(periods, value),
+        );
+        const options = [
+          ["STD;Donchian_Channels", "唐奇安通道 DC"],
+          ["STD;EMA", "指数均线 EMA"],
+          ["STD;RSI", "相对强弱 RSI"],
+          ["STD;MACD", "MACD"],
+          ["STD;Bollinger_Bands", "布林带"],
+        ];
+        let selected = ["STD;Donchian_Channels"];
+        try {
+          const stored = JSON.parse(read("tv-studies-" + index));
+          if (Array.isArray(stored))
+            selected = options
+              .map((o) => o[0])
+              .filter((id) => stored.includes(id));
+        } catch {}
+        function drawChart(destination) {
+          const symbol = "BINANCE:" + market.value + ".P",
+            interval = periods[selector.value][0];
+          const query = new URLSearchParams({ symbol, interval });
+          link.href = "https://www.tradingview.com/chart/?" + query;
+          const widget = document.createElement("script");
+          widget.src =
+            "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+          widget.async = true;
+          widget.textContent = JSON.stringify({
+            autosize: true,
+            symbol,
+            interval,
+            timezone: "Asia/Shanghai",
+            theme: "dark",
+            backgroundColor: "#000000",
+            style: "1",
+            locale: "zh_CN",
+            allow_symbol_change: false,
+            hide_top_toolbar: false,
+            hide_side_toolbar: true,
+            save_image: false,
+            calendar: false,
+            studies: selected,
+          });
+          const host = document.createElement("div");
+          host.className = "tradingview-widget-container";
+          host.style.height = "100%";
+          const chart = document.createElement("div");
+          chart.className = "tradingview-widget-container__widget";
+          chart.style.height = "100%";
+          host.append(chart);
+          widget.onerror = () => {
+            chart.textContent = "TradingView 加载失败，可点「独立打开」查看。";
+          };
+          destination.replaceChildren(host);
+          host.append(widget);
+        }
+        const expandButton = panel.querySelector(".expand-chart");
+        function renderDetail() {
+          detailTitle.textContent = market.value + " · " + selector.selectedOptions[0].text;
+          drawChart(detailPlot);
+        }
+        function render() {
+          drawChart(plot);
+          if (panel.classList.contains("expanded")) renderDetail();
+        }
+        expandButton.onclick = () => {
+          const wasSelected = panel.classList.contains("expanded");
+          closeDetail();
+          if (wasSelected) return;
+          panel.classList.add("expanded");
+          expandButton.setAttribute("aria-expanded", "true");
+          grid.classList.add("split-view");
+          grid.append(detailPanel);
+          renderDetail();
+        };
+        selector.onchange = () => {
+          save("tv-period-" + index, selector.value);
+          render();
+        };
+        render();
+        return render;
+      }
+      if (read('tv-author-card-seen') !== '1') {
+        const card = document.querySelector('.author-card');
+        card.hidden = false;
+        save('tv-author-card-seen', '1');
+        const timer = window.setTimeout(() => { card.hidden = true; }, 5000);
+        card.querySelector('button').onclick = () => {
+          window.clearTimeout(timer);
+          card.hidden = true;
+        };
+      }
+      const quote = document.querySelector('#quote');
+      const stats = Object.fromEntries(Array.from(document.querySelectorAll('[data-stat]'), el => [el.dataset.stat, el]));
+      function resetStats() {
+        for (const el of Object.values(stats)) {
+          el.textContent = '—';
+          delete el.dataset.sign;
+        }
+      }
+      function setStat(key, raw, suffix = '', signed = false) {
+        const n = Number(raw);
+        if (raw == null || !Number.isFinite(n)) return;
+        const digits = key === 'volume' || key === 'percent' ? 2 : n !== 0 && Math.abs(n) < 1 ? 8 : 2;
+        const el = stats[key];
+        el.textContent = (signed && n > 0 ? '+' : '') + n.toLocaleString('en-US', {maximumFractionDigits: digits}) + suffix;
+        if (signed) el.dataset.sign = n > 0 ? 'up' : n < 0 ? 'down' : '';
+      }
+      let stream, retry, priceFrame;
+      function connectQuote() {
+        resetStats();
+        clearTimeout(retry);
+        cancelAnimationFrame(priceFrame);
+        if (stream) {
+          stream.onclose = stream.onmessage = null;
+          stream.close();
+        }
+        const symbol = market.value;
+        let previousPrice;
+        let displayedPrice;
+        let decimals = 0;
+        const format = value => value.toLocaleString('en-US', {
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals
+        });
+        function animatePrice(target) {
+          cancelAnimationFrame(priceFrame);
+          const start = displayedPrice;
+          const started = performance.now();
+          function tick(now) {
+            const progress = Math.min(1, (now - started) / 260);
+            displayedPrice = start + (target - start) * progress;
+            quote.textContent = format(displayedPrice);
+            if (progress < 1) priceFrame = requestAnimationFrame(tick);
+          }
+          priceFrame = requestAnimationFrame(tick);
+        }
+        quote.textContent = '等待报价';
+        quote.dataset.move = '';
+        quote.title = symbol + ' · 币安永续最新成交价（USDT）';
+        function reconnect() {
+          cancelAnimationFrame(priceFrame);
+          resetStats();
+          quote.textContent = '报价重连中';
+          quote.dataset.move = '';
+          retry = setTimeout(connectQuote, 5000);
+        }
+        try {
+          const streams = ['aggTrade', 'ticker', 'markPrice@1s'].map(type => symbol.toLowerCase() + '@' + type);
+          stream = new WebSocket('wss://fstream.binance.com/market/stream?streams=' + streams.join('/'));
+        } catch {
+          reconnect();
+          return;
+        }
+        stream.onclose = reconnect;
+        stream.onmessage = event => {
+          const trade = JSON.parse(event.data).data;
+          if (!trade || trade.s !== symbol) return;
+          if (trade.e === '24hrTicker') {
+            setStat('change', trade.p, '', true);
+            setStat('percent', trade.P, '%', true);
+            setStat('high', trade.h);
+            setStat('low', trade.l);
+            setStat('volume', trade.v, ' ' + symbol.replace(/USDT$/, ''));
+            return;
+          }
+          if (trade.e === 'markPriceUpdate') {
+            setStat('mark', trade.p);
+            setStat('index', trade.i);
+            return;
+          }
+          if (trade.e !== 'aggTrade') return;
+          const price = Number(trade.p);
+          if (trade.s !== symbol || !Number.isFinite(price) || price <= 0) return;
+          quote.dataset.move = price > previousPrice ? 'up' : price < previousPrice ? 'down' : '';
+          decimals = Math.min(8, Math.max(decimals, String(trade.p).replace(/(\.\d*?)0+$/, '$1').split('.')[1]?.length || 0));
+          if (previousPrice === undefined || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            cancelAnimationFrame(priceFrame);
+            displayedPrice = price;
+            quote.textContent = format(price);
+          } else if (price !== previousPrice) {
+            animatePrice(price);
+          }
+          previousPrice = price;
+        };
+      }
+      market.addEventListener('change', connectQuote);
+      connectQuote();
+      const panels = ["5m", "15m", "1h", "4h"].map(createPanel);
+      market.onchange = () => {
+        save("tv-global-market", market.value);
+        panels.forEach((render) => render());
+      };
+    </script>
+  </body>
+</html>
