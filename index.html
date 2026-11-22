@@ -235,12 +235,30 @@
       .market-strip #quote { position: static; transform: none; margin: 0; }
       .market-strip b[data-sign="up"] { color: #ff627c; }
       .market-strip b[data-sign="down"] { color: #36cc96; }
+      .workspace { display: flex; align-items: flex-start; }
+      .workspace main { flex: 1; min-width: 0; }
+      #book { width: clamp(220px, 19vw, 310px); flex: none; margin-left: 7px; padding: 12px; background: #121b24; border: 1px solid #32404f; border-radius: 8px; max-height: calc(100dvh - 55px); overflow: auto; }
+      #book[hidden] { display: none; }
+      .book-head { display: flex; align-items: center; justify-content: space-between; }
+      .book-control { cursor: pointer; background: #18232e; color: #e1eaf1; border: 1px solid #40515e; border-radius: 5px; padding: 4px 8px; }
+      #book-toggle[aria-expanded="true"] { border-color: #66bdbe; }
+      .book-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; text-align: right; padding: 3px 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+      .book-row span:first-child { text-align: left; }
+      .book-label, #book-status { color: #9faebb; font-size: 11px; }
+      #book-status { padding: 8px 0; }
+      .ask span:first-child { color: #ff7288; }
+      .bid span:first-child { color: #33c79a; }
+      #book-spread { border-block: 1px solid #34424f; padding: 7px 0; margin: 3px 0; }
+      @media (max-width: 720px) {
+        #book { position: fixed; top: 54px; left: 0; z-index: 8; width: min(85vw, 300px); }
+      }
     </style>
   </head>
   <body>
     <header>
       <select id="market" aria-label="全部图表合约"></select>
       <h1>四屏看盘</h1>
+      <button class="book-control" id="book-toggle" aria-controls="book" aria-expanded="false">盘口</button>
       <small>币安 USDT 永续 · TradingView 图表</small>
       <div class="market-strip">
       <span id="quote" aria-label="最新成交价">等待报价</span>
@@ -253,7 +271,17 @@
         <span title="24h成交量"><small>24h成交量</small> <b data-stat="volume">—</b></span>
       </div>
     </header>
-    <main></main>
+    <div class="workspace">
+      <aside id="book" hidden aria-label="实时盘口">
+        <div class="book-head"><strong>Order Book · 盘口</strong><button class="book-control" id="book-close" aria-label="关闭盘口">×</button></div>
+        <div id="book-status"></div>
+        <div class="book-row book-label"><span>价格 USDT</span><span id="book-unit">数量</span><span>金额 USDT</span></div>
+        <div id="asks"></div>
+        <div id="book-spread"></div>
+        <div id="bids"></div>
+      </aside>
+      <main></main>
+    </div>
     <aside class="author-card" hidden aria-label="作者信息">
       <span class="author-avatar" aria-hidden="true">A</span>
       <div><small>作者</small><strong>@Aaron_xsy123</strong></div>
@@ -426,6 +454,83 @@
           card.hidden = true;
         };
       }
+      const book = document.querySelector('#book');
+      const bookToggle = document.querySelector('#book-toggle');
+      const asks = document.querySelector('#asks');
+      const bids = document.querySelector('#bids');
+      const spread = document.querySelector('#book-spread');
+      const bookStatus = document.querySelector('#book-status');
+      let bookSocket, bookRetry, bookWatchdog;
+      function stopBook() {
+        clearTimeout(bookRetry);
+        clearTimeout(bookWatchdog);
+        if (bookSocket) {
+          bookSocket.onclose = bookSocket.onmessage = null;
+          bookSocket.close();
+          bookSocket = null;
+        }
+        asks.replaceChildren();
+        bids.replaceChildren();
+        spread.textContent = '';
+      }
+      function bookRows(container, levels, side, maxQty) {
+        const rows = document.createDocumentFragment();
+        for (const [price, qty] of levels) {
+          const row = document.createElement('div');
+          row.className = 'book-row ' + side;
+          const width = Math.min(100, Number(qty) / maxQty * 100);
+          const color = side === 'ask' ? '#38242f' : '#17322e';
+          row.style.background = 'linear-gradient(to left,' + color + ' ' + width + '%, transparent ' + width + '%)';
+          for (const value of [price, qty, (price * qty).toLocaleString('en-US', {maximumFractionDigits: 2})]) {
+            const cell = document.createElement('span');
+            cell.textContent = value;
+            row.append(cell);
+          }
+          rows.append(row);
+        }
+        container.replaceChildren(rows);
+      }
+      function startBook() {
+        stopBook();
+        if (book.hidden) return;
+        const symbol = market.value;
+        document.querySelector('#book-unit').textContent = '数量 ' + symbol.replace(/USDT$/, '');
+        bookStatus.textContent = symbol + ' · 连接中';
+        function retry() {
+          stopBook();
+          bookStatus.textContent = symbol + ' · 盘口暂不可用，正在重连';
+          bookRetry = setTimeout(startBook, 5000);
+        }
+        try {
+          bookSocket = new WebSocket('wss://fstream.binance.com/public/ws/' + symbol.toLowerCase() + '@depth20@500ms');
+        } catch { retry(); return; }
+        bookWatchdog = setTimeout(retry, 15000);
+        bookSocket.onclose = retry;
+        bookSocket.onmessage = event => {
+          const data = JSON.parse(event.data);
+          if (data.s !== symbol || !data.a?.length || !data.b?.length) return;
+          const sell = data.a.filter(level => +level[1] > 0).sort((a,b) => a[0]-b[0]).slice(0,20);
+          const buy = data.b.filter(level => +level[1] > 0).sort((a,b) => b[0]-a[0]).slice(0,20);
+          if (!sell.length || !buy.length) return;
+          clearTimeout(bookWatchdog);
+          bookWatchdog = setTimeout(retry, 15000);
+          const maxQty = Math.max(...sell.concat(buy).map(level => +level[1]));
+          spread.textContent = '买卖价差  ' + Number((sell[0][0] - buy[0][0]).toFixed(8)) + ' USDT';
+          bookRows(asks, sell.reverse(), 'ask', maxQty);
+          bookRows(bids, buy, 'bid', maxQty);
+          bookStatus.textContent = symbol + ' · ' + new Date(data.E).toLocaleTimeString('zh-CN');
+        };
+      }
+      function showBook(open) {
+        book.hidden = !open;
+        bookToggle.setAttribute('aria-expanded', String(open));
+        save('book-open', String(open));
+        startBook();
+      }
+      bookToggle.onclick = () => showBook(book.hidden);
+      document.querySelector('#book-close').onclick = () => { showBook(false); bookToggle.focus(); };
+      market.addEventListener('change', startBook);
+      showBook(read('book-open') === 'true');
       const quote = document.querySelector('#quote');
       const stats = Object.fromEntries(Array.from(document.querySelectorAll('[data-stat]'), el => [el.dataset.stat, el]));
       function resetStats() {
